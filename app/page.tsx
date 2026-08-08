@@ -4,7 +4,7 @@ import { importActualProduction } from "@/features/actual-import/import";
 import { DAYS_OF_HISTORY } from "@/features/expected-sync/open-meteo";
 import { syncExpectedProduction } from "@/features/expected-sync/sync";
 import { supabase } from "@/lib/supabase";
-import { clearAllData } from "./reset";
+import { clearExpectedProduction, clearReportedProduction } from "./reset";
 
 // Every visit reads the current state of the database. Without this the page would
 // be prerendered at build time, which would also mean the build needs a reachable
@@ -147,6 +147,42 @@ function RunPanel({
   );
 }
 
+/**
+ * A destructive control, kept beside the thing it destroys rather than collected with
+ * the others at the foot of the page. A native disclosure element gives it its second
+ * click without the page needing any JavaScript to hide the button behind the first.
+ */
+function ClearControl({
+  label,
+  description,
+  action,
+}: {
+  label: string;
+  description: string;
+  action: () => Promise<void>;
+}) {
+  return (
+    <details className="text-xs">
+      <summary className="w-fit cursor-pointer text-zinc-500 transition-colors hover:text-zinc-800">
+        {label}
+      </summary>
+
+      <div className="mt-3 flex flex-col items-start gap-3">
+        <p className="text-zinc-500">{description}</p>
+
+        <form action={action}>
+          <button
+            type="submit"
+            className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50"
+          >
+            Yes, clear it
+          </button>
+        </form>
+      </div>
+    </details>
+  );
+}
+
 export default async function Home() {
   const { data: expectedRun, error: expectedRunError } = await supabase
     .from("sync_runs")
@@ -259,6 +295,12 @@ export default async function Home() {
           <p className="text-xs text-zinc-500">
             {expectedCount ?? 0} days derived from radiation on record.
           </p>
+
+          <ClearControl
+            label="Clear expected production"
+            description="Removes every derived day and the sync runs that produced them. The site itself stays, so there is still something to sync."
+            action={clearExpectedProduction}
+          />
         </section>
 
         <section className="flex flex-col gap-4">
@@ -287,6 +329,12 @@ export default async function Home() {
           </RunPanel>
 
           <p className="text-xs text-zinc-500">{actualCount ?? 0} days reported on record.</p>
+
+          <ClearControl
+            label="Clear reported production"
+            description="Removes every imported day, every rejected row and the import runs that recorded them. The file itself is not stored, so importing it again is how it comes back."
+            action={clearReportedProduction}
+          />
         </section>
 
         <section className="flex flex-col gap-4">
@@ -352,30 +400,6 @@ export default async function Home() {
             </table>
           </div>
         </section>
-
-        {/* A native disclosure element, so the destructive button takes two clicks
-            without the page needing any JavaScript to hide it behind the first. */}
-        <details className="border-t border-zinc-200 pt-6">
-          <summary className="w-fit cursor-pointer text-xs text-zinc-500 transition-colors hover:text-zinc-800">
-            Clear all data
-          </summary>
-
-          <div className="mt-4 flex flex-col items-start gap-3">
-            <p className="text-xs text-zinc-500">
-              Removes every synced day, every imported day, every rejected row and every run. The
-              site itself stays, so there is still something to sync.
-            </p>
-
-            <form action={clearAllData}>
-              <button
-                type="submit"
-                className="rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50"
-              >
-                Yes, clear it
-              </button>
-            </form>
-          </div>
-        </details>
       </main>
     </div>
   );
