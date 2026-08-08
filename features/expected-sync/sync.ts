@@ -30,9 +30,19 @@ export async function syncExpectedProduction(): Promise<void> {
   // The run is recorded before any work starts, so a process that dies partway
   // through still leaves evidence of having tried. Nothing here knows the site yet;
   // site_id is filled in by the same update that closes the run out.
+  //
+  // started_at is sent rather than left to the column default, so that both ends of
+  // the interval are read from the same clock. Taking one from the database and the
+  // other from here makes the run's duration a measure of the gap between two
+  // machines, and a database running even a second ahead would push finished_at
+  // before started_at and fail sync_runs_finished_after_started.
   const { data: run, error: runError } = await supabase
     .from("sync_runs")
-    .insert({ kind: "expected_fetch", status: "running" })
+    .insert({
+      kind: "expected_fetch",
+      status: "running",
+      started_at: new Date().toISOString(),
+    })
     .select("id")
     .single<{ id: string }>();
 
@@ -87,7 +97,7 @@ export async function syncExpectedProduction(): Promise<void> {
       throw new Error(`Could not write expected production: ${upsertError.message}`);
     }
 
-    await supabase
+    const { error: closeError } = await supabase
       .from("sync_runs")
       .update({
         status: "succeeded",
@@ -96,18 +106,33 @@ export async function syncExpectedProduction(): Promise<void> {
         site_id: site.id,
       })
       .eq("id", run.id);
+
+    // Checked like every other write. An unchecked one leaves the run at 'running'
+    // for good, which reads as a process that died rather than as a write that was
+    // refused, and sends anyone looking into it after the wrong thing entirely.
+    if (closeError) {
+      throw new Error(`Could not close the sync run out: ${closeError.message}`);
+    }
   } catch (error) {
     // The failure becomes a row rather than a stack trace, which is what makes it
     // visible on the dashboard. Rethrowing would replace the page with an error
     // screen and hide the record that was just written.
-    await supabase
+    const message = error instanceof Error ? error.message : String(error);
+
+    const { error: recordError } = await supabase
       .from("sync_runs")
       .update({
         status: "failed",
         finished_at: new Date().toISOString(),
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       })
       .eq("id", run.id);
+
+    // Nothing is left that can carry the news. An error screen is worse than a
+    // dashboard entry and better than a run that quietly claims to still be going.
+    if (recordError) {
+      throw new Error(`${message} (the run could not be marked failed: ${recordError.message})`);
+    }
   }
 
   revalidatePath("/");

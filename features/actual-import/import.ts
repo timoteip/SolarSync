@@ -151,9 +151,17 @@ export async function importActualProduction(formData: FormData): Promise<void> 
   // one first: an import that dies partway through still has to be visible as a run
   // that was attempted. site_id stays null because one file may carry rows for more
   // than one site, so the run as a whole is not about any single one.
+  //
+  // started_at is sent rather than left to the column default, so that both ends of
+  // the interval come from this clock instead of one from here and one from the
+  // database. See the same insert in the expected sync.
   const { data: run, error: runError } = await supabase
     .from("sync_runs")
-    .insert({ kind: "actual_import", status: "running" })
+    .insert({
+      kind: "actual_import",
+      status: "running",
+      started_at: new Date().toISOString(),
+    })
     .select("id")
     .single<{ id: string }>();
 
@@ -259,7 +267,7 @@ export async function importActualProduction(formData: FormData): Promise<void> 
     // A file of thirty good rows and two bad ones is a run that worked. Failing the
     // whole import over a rejected row would throw away thirty valid days, which is
     // the opposite of what the quarantine table exists to prevent.
-    await supabase
+    const { error: closeError } = await supabase
       .from("sync_runs")
       .update({
         status: "succeeded",
@@ -268,15 +276,28 @@ export async function importActualProduction(formData: FormData): Promise<void> 
         rows_quarantined: rejected.length,
       })
       .eq("id", run.id);
+
+    // Checked like every other write, so that a refused update shows up as a failed
+    // run rather than as one that appears to still be going.
+    if (closeError) {
+      throw new Error(`Could not close the import run out: ${closeError.message}`);
+    }
   } catch (error) {
-    await supabase
+    const message = error instanceof Error ? error.message : String(error);
+
+    const { error: recordError } = await supabase
       .from("sync_runs")
       .update({
         status: "failed",
         finished_at: new Date().toISOString(),
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       })
       .eq("id", run.id);
+
+    // Nothing is left that can carry the news, so it goes to the caller instead.
+    if (recordError) {
+      throw new Error(`${message} (the run could not be marked failed: ${recordError.message})`);
+    }
   }
 
   revalidatePath("/");
