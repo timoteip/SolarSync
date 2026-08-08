@@ -44,9 +44,9 @@ type QuarantineRow = {
 const RUN_COLUMNS = "id, status, started_at, rows_written, rows_quarantined, error";
 
 const statusStyles: Record<string, string> = {
-  succeeded: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
-  failed: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
-  running: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+  succeeded: "bg-emerald-100 text-emerald-800",
+  failed: "bg-red-100 text-red-800",
+  running: "bg-amber-100 text-amber-800",
 };
 
 function formatKwh(value: number): string {
@@ -71,7 +71,7 @@ function RunPanel({
   children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
+    <div className="flex flex-col gap-4 rounded-lg border border-zinc-200 bg-white p-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-col gap-2">
           <span className="text-xs font-medium tracking-wide text-zinc-500 uppercase">{label}</span>
@@ -84,22 +84,20 @@ function RunPanel({
               >
                 {run.status}
               </span>
-              <span className="text-zinc-600 dark:text-zinc-400">
+              <span className="text-zinc-600">
                 {new Date(run.started_at).toLocaleString("en-GB")}
               </span>
-              <span className="text-zinc-600 dark:text-zinc-400">
-                {run.rows_written} rows written
-              </span>
+              <span className="text-zinc-600">{run.rows_written} rows written</span>
               {/* Only shown when it happened. A permanent "0 quarantined" would read
                   as a metric to watch rather than as an exception worth opening. */}
               {run.rows_quarantined > 0 && (
-                <span className="font-medium text-amber-700 dark:text-amber-400">
+                <span className="font-medium text-amber-700">
                   {run.rows_quarantined} quarantined
                 </span>
               )}
             </div>
           ) : (
-            <span className="text-sm text-zinc-600 dark:text-zinc-400">Never run.</span>
+            <span className="text-sm text-zinc-600">Never run.</span>
           )}
         </div>
 
@@ -107,9 +105,7 @@ function RunPanel({
       </div>
 
       {run?.error && (
-        <p className="rounded-md bg-red-50 px-3 py-2 font-mono text-xs text-red-800 dark:bg-red-950/50 dark:text-red-300">
-          {run.error}
-        </p>
+        <p className="rounded-md bg-red-50 px-3 py-2 font-mono text-xs text-red-800">{run.error}</p>
       )}
     </div>
   );
@@ -176,7 +172,7 @@ export default async function Home() {
   }
 
   return (
-    <div className="min-h-full bg-zinc-50 font-sans dark:bg-black">
+    <div className="min-h-full bg-zinc-50 font-sans">
       <main className="mx-auto flex w-full max-w-3xl flex-col gap-12 px-6 py-16">
         <header className="flex items-center gap-3">
           {/* The same drawing as app/icon.svg, inlined so it costs no extra request.
@@ -193,25 +189,21 @@ export default async function Home() {
             <polygon points="4.84,5.35 5.42,9.6 1.66,8.24" fill="#3e6db5" />
           </svg>
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight text-black dark:text-zinc-50">
-              solar-sync
-            </h1>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            <h1 className="text-2xl font-semibold tracking-tight text-black">solar-sync</h1>
+            <p className="text-sm text-zinc-600">
               Expected and reported production for Leola Rooftop Array.
             </p>
           </div>
         </header>
 
         <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-black dark:text-zinc-50">
-            Expected production
-          </h2>
+          <h2 className="text-sm font-semibold text-black">Expected production</h2>
 
           <RunPanel label="Last sync" run={expectedRun}>
             <form action={syncExpectedProduction}>
               <button
                 type="submit"
-                className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-black dark:hover:bg-zinc-200"
+                className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800"
               >
                 Sync {DAYS_OF_HISTORY} days
               </button>
@@ -225,28 +217,26 @@ export default async function Home() {
               : ""}
           </p>
 
-          <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+          <div className="overflow-x-auto rounded-lg border border-zinc-200">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="bg-zinc-100 text-left text-xs tracking-wide text-zinc-600 uppercase dark:bg-zinc-900 dark:text-zinc-400">
+                <tr className="bg-zinc-100 text-left text-xs tracking-wide text-zinc-600 uppercase">
                   <th className="px-4 py-2 font-medium">Date</th>
                   <th className="px-4 py-2 text-right font-medium">Radiation MJ/m²</th>
                   <th className="px-4 py-2 text-right font-medium">Expected kWh</th>
                 </tr>
               </thead>
-              <tbody className="bg-white dark:bg-zinc-950">
+              <tbody className="bg-white">
                 {expectedDays && expectedDays.length > 0 ? (
                   expectedDays.map((day) => (
-                    <tr key={day.date} className="border-t border-zinc-200 dark:border-zinc-800">
+                    <tr key={day.date} className="border-t border-zinc-200">
                       {/* Printed as stored. Parsing it into a Date would read the
                           local day as UTC midnight and shift it a day west. */}
-                      <td className="px-4 py-2 font-mono text-zinc-900 dark:text-zinc-100">
-                        {day.date}
-                      </td>
-                      <td className="px-4 py-2 text-right text-zinc-600 tabular-nums dark:text-zinc-400">
+                      <td className="px-4 py-2 font-mono text-zinc-900">{day.date}</td>
+                      <td className="px-4 py-2 text-right text-zinc-600 tabular-nums">
                         {day.radiation_mj_m2}
                       </td>
-                      <td className="px-4 py-2 text-right text-zinc-900 tabular-nums dark:text-zinc-100">
+                      <td className="px-4 py-2 text-right text-zinc-900 tabular-nums">
                         {formatKwh(day.expected_kwh)}
                       </td>
                     </tr>
@@ -264,7 +254,7 @@ export default async function Home() {
         </section>
 
         <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-black dark:text-zinc-50">Actual production</h2>
+          <h2 className="text-sm font-semibold text-black">Actual production</h2>
 
           <RunPanel label="Last import" run={importRun}>
             <form action={importActualProduction} className="flex flex-wrap items-center gap-3">
@@ -277,11 +267,11 @@ export default async function Home() {
                 type="file"
                 accept=".csv,text/csv"
                 required
-                className="max-w-full text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-zinc-900 hover:file:bg-zinc-200 dark:text-zinc-400 dark:file:bg-zinc-800 dark:file:text-zinc-100 dark:hover:file:bg-zinc-700"
+                className="max-w-full text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-zinc-900 hover:file:bg-zinc-200"
               />
               <button
                 type="submit"
-                className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-black dark:hover:bg-zinc-200"
+                className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800"
               >
                 Import
               </button>
@@ -295,31 +285,26 @@ export default async function Home() {
                 of them were thrown away.
               </p>
 
-              <div className="overflow-x-auto rounded-lg border border-amber-200 dark:border-amber-900">
+              <div className="overflow-x-auto rounded-lg border border-amber-200">
                 <table className="w-full border-collapse text-sm">
                   <thead>
-                    <tr className="bg-amber-50 text-left text-xs tracking-wide text-amber-800 uppercase dark:bg-amber-950/40 dark:text-amber-300">
+                    <tr className="bg-amber-50 text-left text-xs tracking-wide text-amber-800 uppercase">
                       <th className="px-4 py-2 font-medium">Row</th>
                       <th className="px-4 py-2 font-medium">Reason</th>
                       <th className="px-4 py-2 font-medium">Detail</th>
                       <th className="px-4 py-2 font-medium">Submitted</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white dark:bg-zinc-950">
+                  <tbody className="bg-white">
                     {rejectedRows.map((row) => (
-                      <tr
-                        key={row.source_row_number}
-                        className="border-t border-zinc-200 dark:border-zinc-800"
-                      >
-                        <td className="px-4 py-2 text-zinc-600 tabular-nums dark:text-zinc-400">
+                      <tr key={row.source_row_number} className="border-t border-zinc-200">
+                        <td className="px-4 py-2 text-zinc-600 tabular-nums">
                           {row.source_row_number}
                         </td>
-                        <td className="px-4 py-2 font-mono text-xs whitespace-nowrap text-amber-700 dark:text-amber-400">
+                        <td className="px-4 py-2 font-mono text-xs whitespace-nowrap text-amber-700">
                           {row.reason_code}
                         </td>
-                        <td className="px-4 py-2 text-zinc-900 dark:text-zinc-100">
-                          {row.reason_detail}
-                        </td>
+                        <td className="px-4 py-2 text-zinc-900">{row.reason_detail}</td>
                         <td className="px-4 py-2 font-mono text-xs text-zinc-500">
                           {row.raw_payload.line}
                         </td>
@@ -338,23 +323,21 @@ export default async function Home() {
               : ""}
           </p>
 
-          <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+          <div className="overflow-x-auto rounded-lg border border-zinc-200">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="bg-zinc-100 text-left text-xs tracking-wide text-zinc-600 uppercase dark:bg-zinc-900 dark:text-zinc-400">
+                <tr className="bg-zinc-100 text-left text-xs tracking-wide text-zinc-600 uppercase">
                   <th className="px-4 py-2 font-medium">Date</th>
                   <th className="px-4 py-2 text-right font-medium">Actual kWh</th>
                   <th className="px-4 py-2 font-medium">Source file</th>
                 </tr>
               </thead>
-              <tbody className="bg-white dark:bg-zinc-950">
+              <tbody className="bg-white">
                 {actualDays && actualDays.length > 0 ? (
                   actualDays.map((day) => (
-                    <tr key={day.date} className="border-t border-zinc-200 dark:border-zinc-800">
-                      <td className="px-4 py-2 font-mono text-zinc-900 dark:text-zinc-100">
-                        {day.date}
-                      </td>
-                      <td className="px-4 py-2 text-right text-zinc-900 tabular-nums dark:text-zinc-100">
+                    <tr key={day.date} className="border-t border-zinc-200">
+                      <td className="px-4 py-2 font-mono text-zinc-900">{day.date}</td>
+                      <td className="px-4 py-2 text-right text-zinc-900 tabular-nums">
                         {formatKwh(day.actual_kwh)}
                       </td>
                       <td className="px-4 py-2 text-zinc-500">{day.source_file}</td>

@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 :root {
+  /* The page is light on every machine, whatever the operating system prefers.
+     This line covers the controls the browser draws itself — the file picker
+     button, scrollbars, focus rings — which would otherwise come out dark. */
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #171717;
 }
@@ -10,13 +14,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
