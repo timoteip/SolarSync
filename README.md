@@ -23,8 +23,9 @@ number stores the raw value it came from.
 - **Run log** — every sync and every import writes a record, successes and failures
   alike. The record is opened before the work starts, so a run that dies partway
   through is still visible as a run that was attempted.
-- **Dashboard** — the outcome of the most recent sync and the most recent import, the
-  two series of daily figures, and the rows the last import rejected.
+- **Dashboard** — the outcome of the most recent sync and the most recent import, how
+  many rows that import rejected, and the two series on one row per day with a verdict
+  on whether they agree.
 
 ## What it deliberately does not do
 
@@ -32,9 +33,17 @@ number stores the raw value it came from.
   reads are machine exports of daily totals — a date, a number and a site name — so a
   value containing a comma is rejected as a malformed row rather than stored as a
   guess. That limit is the reason the project does not pull in a CSV library.
-- **It does not compare the two series.** Expected and actual are shown as separate
-  tables; nothing yet puts them on one row or flags a divergence. That is the next
-  slice, not a missing piece of this one.
+- **The comparison is a flat tolerance, not a diagnosis.** A day is flagged when the
+  reported figure sits more than 10% from the derived one, in either direction. It does
+  not say why, and it does not adapt the threshold to the season or to the weather. The
+  point is to narrow a month down to the days worth opening.
+- **The comparison is driven by reported days.** A day with expected production and no
+  report does not appear. It is a gap in reporting rather than a variance, and the run
+  log is where an absent import shows up.
+- **The dashboard counts rejected rows without listing them.** The import panel shows
+  how many a file lost and the rows themselves are in `quarantine`, reason and original
+  line intact, but nothing on the page reads them back. Screen space went to the
+  comparison instead.
 - **One site.** The expected sync looks it up by name. Nothing about the schema is
   single-site, but nothing iterates yet either.
 - **No tests.** `features/actual-import/parse-csv.ts` is pure and takes no database, so
@@ -79,7 +88,7 @@ order, then `supabase/seed.sql` to insert the site.
 ## Project layout
 
 ```
-app/         routes and pages
+app/         routes, pages, and the reset the dashboard offers
 features/    one folder per slice, each owning its own fetch, logic, and persistence
 lib/         environment validation and the Supabase client
 samples/     a deliberately imperfect CSV, one bad row per rejection reason

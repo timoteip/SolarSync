@@ -4,14 +4,21 @@ import { importActualProduction } from "@/features/actual-import/import";
 import { DAYS_OF_HISTORY } from "@/features/expected-sync/open-meteo";
 import { syncExpectedProduction } from "@/features/expected-sync/sync";
 import { supabase } from "@/lib/supabase";
+import { clearAllData } from "./reset";
 
 // Every visit reads the current state of the database. Without this the page would
 // be prerendered at build time, which would also mean the build needs a reachable
 // database to succeed.
 export const dynamic = "force-dynamic";
 
-// The tables stay readable while the database keeps every day ever recorded.
+// The table stays readable while the database keeps every day ever recorded.
 const ROWS_SHOWN = 14;
+
+// How far the reported figure may sit from the derived one before the day is worth
+// opening. A model this simple never lands on the reported number exactly, so the
+// tolerance has to be wider than the model's own error. Both directions count:
+// production well above what the sun could have supplied is a disagreement too.
+const VARIANCE_TOLERANCE = 0.1;
 
 type RunRow = {
   id: string;
@@ -24,21 +31,12 @@ type RunRow = {
 
 type ExpectedRow = {
   date: string;
-  radiation_mj_m2: number;
   expected_kwh: number;
 };
 
 type ActualRow = {
   date: string;
   actual_kwh: number;
-  source_file: string;
-};
-
-type QuarantineRow = {
-  source_row_number: number;
-  reason_code: string;
-  reason_detail: string | null;
-  raw_payload: { line?: string };
 };
 
 const RUN_COLUMNS = "id, status, started_at, rows_written, rows_quarantined, error";
@@ -53,6 +51,44 @@ function formatKwh(value: number): string {
   return value.toLocaleString("en-US", {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
+  });
+}
+
+// A day the sync has not covered is not a day the site got wrong, so it gets its own
+// verdict rather than being counted against the operator.
+type Verdict = "ok" | "off" | "no-expected";
+
+const verdicts: Record<Verdict, { label: string; style: string }> = {
+  ok: { label: "OK", style: "bg-emerald-100 text-emerald-800" },
+  off: { label: "Not OK", style: "bg-red-100 text-red-800" },
+  "no-expected": { label: "No expected figure", style: "bg-zinc-100 text-zinc-600" },
+};
+
+function verdictFor(expectedKwh: number | null, actualKwh: number): Verdict {
+  if (expectedKwh === null) {
+    return "no-expected";
+  }
+
+  // A fully overcast day derives to zero, and dividing by it would give Infinity.
+  // Nothing reported against a zero expectation agrees with it; zero does.
+  if (expectedKwh === 0) {
+    return actualKwh === 0 ? "ok" : "off";
+  }
+
+  return Math.abs(actualKwh - expectedKwh) / expectedKwh <= VARIANCE_TOLERANCE ? "ok" : "off";
+}
+
+function formatDifference(expectedKwh: number | null, actualKwh: number): string {
+  if (expectedKwh === null || expectedKwh === 0) {
+    return "—";
+  }
+
+  // signDisplay puts a + on the gains, so a column of differences reads as a
+  // direction rather than as a set of unrelated numbers.
+  return ((actualKwh - expectedKwh) / expectedKwh).toLocaleString("en-US", {
+    style: "percent",
+    signDisplay: "exceptZero",
+    maximumFractionDigits: 0,
   });
 }
 
@@ -128,48 +164,58 @@ export default async function Home() {
     .limit(1)
     .maybeSingle<RunRow>();
 
-  // count is the total number of stored days, unaffected by the limit below.
-  const {
-    data: expectedDays,
-    count: expectedCount,
-    error: expectedError,
-  } = await supabase
+  // head skips the rows and asks only for the total, which is all the caption needs.
+  const { count: expectedCount, error: expectedCountError } = await supabase
     .from("expected_daily")
-    .select("date, radiation_mj_m2, expected_kwh", { count: "exact" })
-    .order("date", { ascending: false })
-    .limit(ROWS_SHOWN)
-    .returns<ExpectedRow[]>();
+    .select("date", { count: "exact", head: true });
 
+  // The comparison is driven by the days that were reported. A day nobody reported
+  // is a gap in reporting rather than a variance, and listing every unreported day
+  // would bury the handful that can actually be judged.
   const {
     data: actualDays,
     count: actualCount,
     error: actualError,
   } = await supabase
     .from("actual_daily")
-    .select("date, actual_kwh, source_file", { count: "exact" })
+    .select("date, actual_kwh", { count: "exact" })
     .order("date", { ascending: false })
     .limit(ROWS_SHOWN)
     .returns<ActualRow[]>();
 
-  // Scoped to the latest import rather than to the whole table, so the rows on show
-  // are the ones the operator just submitted and not a backlog of old rejections.
-  const { data: rejectedRows, error: rejectedError } = importRun
-    ? await supabase
-        .from("quarantine")
-        .select("source_row_number, reason_code, reason_detail, raw_payload")
-        .eq("sync_run_id", importRun.id)
-        .order("source_row_number", { ascending: true })
-        .returns<QuarantineRow[]>()
-    : { data: null, error: null };
+  const reportedDates = actualDays?.map((day) => day.date) ?? [];
+
+  // Only the derived figures that have a reported day to sit beside.
+  const { data: expectedDays, error: expectedError } =
+    reportedDates.length > 0
+      ? await supabase
+          .from("expected_daily")
+          .select("date, expected_kwh")
+          .in("date", reportedDates)
+          .returns<ExpectedRow[]>()
+      : { data: null, error: null };
 
   // A query that failed is not the same as a site with no data, and rendering the
   // empty state for both would hide a broken database behind a plausible page.
   const readError =
-    expectedRunError ?? importRunError ?? expectedError ?? actualError ?? rejectedError;
+    expectedRunError ?? importRunError ?? expectedCountError ?? actualError ?? expectedError;
 
   if (readError) {
     throw new Error(`Could not read production data: ${readError.message}`);
   }
+
+  // One lookup built once, rather than scanning the expected rows again for every
+  // reported day. get returns undefined for a day the sync has not covered, and the
+  // rest of the page treats that absence as a value of its own.
+  const expectedByDate = new Map<string, number>(
+    expectedDays?.map((day) => [day.date, day.expected_kwh]) ?? [],
+  );
+
+  const comparison = (actualDays ?? []).map((day) => ({
+    date: day.date,
+    actualKwh: day.actual_kwh,
+    expectedKwh: expectedByDate.get(day.date) ?? null,
+  }));
 
   return (
     <div className="min-h-full bg-zinc-50 font-sans">
@@ -211,50 +257,12 @@ export default async function Home() {
           </RunPanel>
 
           <p className="text-xs text-zinc-500">
-            {expectedCount ?? 0} days on record
-            {expectedCount && expectedCount > ROWS_SHOWN
-              ? `, showing the most recent ${ROWS_SHOWN}`
-              : ""}
+            {expectedCount ?? 0} days derived from radiation on record.
           </p>
-
-          <div className="overflow-x-auto rounded-lg border border-zinc-200">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="bg-zinc-100 text-left text-xs tracking-wide text-zinc-600 uppercase">
-                  <th className="px-4 py-2 font-medium">Date</th>
-                  <th className="px-4 py-2 text-right font-medium">Radiation MJ/m²</th>
-                  <th className="px-4 py-2 text-right font-medium">Expected kWh</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white">
-                {expectedDays && expectedDays.length > 0 ? (
-                  expectedDays.map((day) => (
-                    <tr key={day.date} className="border-t border-zinc-200">
-                      {/* Printed as stored. Parsing it into a Date would read the
-                          local day as UTC midnight and shift it a day west. */}
-                      <td className="px-4 py-2 font-mono text-zinc-900">{day.date}</td>
-                      <td className="px-4 py-2 text-right text-zinc-600 tabular-nums">
-                        {day.radiation_mj_m2}
-                      </td>
-                      <td className="px-4 py-2 text-right text-zinc-900 tabular-nums">
-                        {formatKwh(day.expected_kwh)}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={3} className="px-4 py-8 text-center text-zinc-500">
-                      No expected production yet. Run a sync.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
         </section>
 
         <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-black">Actual production</h2>
+          <h2 className="text-sm font-semibold text-black">Reported production</h2>
 
           <RunPanel label="Last import" run={importRun}>
             <form action={importActualProduction} className="flex flex-wrap items-center gap-3">
@@ -278,49 +286,19 @@ export default async function Home() {
             </form>
           </RunPanel>
 
-          {rejectedRows && rejectedRows.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-zinc-500">
-                Rows the last import rejected. None of them reached the production table, and none
-                of them were thrown away.
-              </p>
+          <p className="text-xs text-zinc-500">{actualCount ?? 0} days reported on record.</p>
+        </section>
 
-              <div className="overflow-x-auto rounded-lg border border-amber-200">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-amber-50 text-left text-xs tracking-wide text-amber-800 uppercase">
-                      <th className="px-4 py-2 font-medium">Row</th>
-                      <th className="px-4 py-2 font-medium">Reason</th>
-                      <th className="px-4 py-2 font-medium">Detail</th>
-                      <th className="px-4 py-2 font-medium">Submitted</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white">
-                    {rejectedRows.map((row) => (
-                      <tr key={row.source_row_number} className="border-t border-zinc-200">
-                        <td className="px-4 py-2 text-zinc-600 tabular-nums">
-                          {row.source_row_number}
-                        </td>
-                        <td className="px-4 py-2 font-mono text-xs whitespace-nowrap text-amber-700">
-                          {row.reason_code}
-                        </td>
-                        <td className="px-4 py-2 text-zinc-900">{row.reason_detail}</td>
-                        <td className="px-4 py-2 font-mono text-xs text-zinc-500">
-                          {row.raw_payload.line}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+        <section className="flex flex-col gap-4">
+          <h2 className="text-sm font-semibold text-black">Expected against reported</h2>
 
           <p className="text-xs text-zinc-500">
-            {actualCount ?? 0} days on record
-            {actualCount && actualCount > ROWS_SHOWN
-              ? `, showing the most recent ${ROWS_SHOWN}`
-              : ""}
+            A day is OK when the reported figure sits within{" "}
+            {VARIANCE_TOLERANCE.toLocaleString("en-US", { style: "percent" })} of the figure derived
+            from that day&rsquo;s radiation, in either direction.{" "}
+            {comparison.length === ROWS_SHOWN
+              ? `Only the most recent ${ROWS_SHOWN} reported days appear.`
+              : "Only reported days appear."}
           </p>
 
           <div className="overflow-x-auto rounded-lg border border-zinc-200">
@@ -328,25 +306,45 @@ export default async function Home() {
               <thead>
                 <tr className="bg-zinc-100 text-left text-xs tracking-wide text-zinc-600 uppercase">
                   <th className="px-4 py-2 font-medium">Date</th>
-                  <th className="px-4 py-2 text-right font-medium">Actual kWh</th>
-                  <th className="px-4 py-2 font-medium">Source file</th>
+                  <th className="px-4 py-2 text-right font-medium">Expected kWh</th>
+                  <th className="px-4 py-2 text-right font-medium">Reported kWh</th>
+                  <th className="px-4 py-2 text-right font-medium">Difference</th>
+                  <th className="px-4 py-2 font-medium">Status</th>
                 </tr>
               </thead>
               <tbody className="bg-white">
-                {actualDays && actualDays.length > 0 ? (
-                  actualDays.map((day) => (
-                    <tr key={day.date} className="border-t border-zinc-200">
-                      <td className="px-4 py-2 font-mono text-zinc-900">{day.date}</td>
-                      <td className="px-4 py-2 text-right text-zinc-900 tabular-nums">
-                        {formatKwh(day.actual_kwh)}
-                      </td>
-                      <td className="px-4 py-2 text-zinc-500">{day.source_file}</td>
-                    </tr>
-                  ))
+                {comparison.length > 0 ? (
+                  comparison.map((day) => {
+                    const verdict = verdicts[verdictFor(day.expectedKwh, day.actualKwh)];
+
+                    return (
+                      <tr key={day.date} className="border-t border-zinc-200">
+                        {/* Printed as stored. Parsing it into a Date would read the
+                            local day as UTC midnight and shift it a day west. */}
+                        <td className="px-4 py-2 font-mono text-zinc-900">{day.date}</td>
+                        <td className="px-4 py-2 text-right text-zinc-600 tabular-nums">
+                          {day.expectedKwh === null ? "—" : formatKwh(day.expectedKwh)}
+                        </td>
+                        <td className="px-4 py-2 text-right text-zinc-900 tabular-nums">
+                          {formatKwh(day.actualKwh)}
+                        </td>
+                        <td className="px-4 py-2 text-right text-zinc-600 tabular-nums">
+                          {formatDifference(day.expectedKwh, day.actualKwh)}
+                        </td>
+                        <td className="px-4 py-2">
+                          <span
+                            className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${verdict.style}`}
+                          >
+                            {verdict.label}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
                 ) : (
                   <tr>
-                    <td colSpan={3} className="px-4 py-8 text-center text-zinc-500">
-                      No reported production yet. Import a CSV.
+                    <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">
+                      Nothing to compare yet. Run a sync, then import a CSV.
                     </td>
                   </tr>
                 )}
@@ -354,6 +352,30 @@ export default async function Home() {
             </table>
           </div>
         </section>
+
+        {/* A native disclosure element, so the destructive button takes two clicks
+            without the page needing any JavaScript to hide it behind the first. */}
+        <details className="border-t border-zinc-200 pt-6">
+          <summary className="w-fit cursor-pointer text-xs text-zinc-500 transition-colors hover:text-zinc-800">
+            Clear all data
+          </summary>
+
+          <div className="mt-4 flex flex-col items-start gap-3">
+            <p className="text-xs text-zinc-500">
+              Removes every synced day, every imported day, every rejected row and every run. The
+              site itself stays, so there is still something to sync.
+            </p>
+
+            <form action={clearAllData}>
+              <button
+                type="submit"
+                className="rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50"
+              >
+                Yes, clear it
+              </button>
+            </form>
+          </div>
+        </details>
       </main>
     </div>
   );
