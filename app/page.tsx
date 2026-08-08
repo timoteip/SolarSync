@@ -178,13 +178,28 @@ export default async function Home() {
   return (
     <div className="min-h-full bg-zinc-50 font-sans dark:bg-black">
       <main className="mx-auto flex w-full max-w-3xl flex-col gap-12 px-6 py-16">
-        <header className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-black dark:text-zinc-50">
-            solar-sync
-          </h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Expected and reported production for Leola Rooftop Array.
-          </p>
+        <header className="flex items-center gap-3">
+          {/* The same drawing as app/icon.svg, inlined so it costs no extra request.
+              Hidden from screen readers because the name sits right beside it. */}
+          <svg viewBox="0 0 24 24" aria-hidden="true" className="h-9 w-9 shrink-0">
+            <circle cx="12" cy="12" r="5.5" fill="#facc15" />
+            <path
+              d="M15.08 3.54 A 9 9 0 1 1 3.98 7.91"
+              fill="none"
+              stroke="#3e6db5"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+            />
+            <polygon points="4.84,5.35 5.42,9.6 1.66,8.24" fill="#3e6db5" />
+          </svg>
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-semibold tracking-tight text-black dark:text-zinc-50">
+              solar-sync
+            </h1>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Expected and reported production for Leola Rooftop Array.
+            </p>
+          </div>
         </header>
 
         <section className="flex flex-col gap-4">
