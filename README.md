@@ -1,9 +1,10 @@
 # solar-sync
 
-A daily data-integration pipeline for solar sites. It pulls solar radiation and weather
-for a site from the [Open-Meteo](https://open-meteo.com/) API, derives the production
-that site should have generated, imports the production it actually reported, and
-surfaces the gap between the two.
+Live at [solar-sync-gamma.vercel.app](https://solar-sync-gamma.vercel.app).
+
+A daily data-integration pipeline for solar sites. It pulls solar radiation for a site
+from the [Open-Meteo](https://open-meteo.com/) API, derives the production that site
+should have generated, and imports the production the operator actually reported.
 
 The interesting part of the project is the seam between two data sources that disagree
 with each other, so the design leans on auditability: every sync is logged, every
@@ -12,13 +13,38 @@ number stores the raw value it came from.
 
 ## What it does
 
-- **Expected production** — fetches daily shortwave radiation per site and computes
-  expected output from the site's capacity and performance ratio.
-- **Actual production** — imports operator-supplied CSV. Rows that fail validation go
-  to a quarantine table with a reason attached. Nothing is dropped silently.
-- **Run log** — every sync writes a record, successes and failures alike.
-- **Dashboard** — last sync status, expected against actual, and variance flags where
-  the two diverge beyond tolerance.
+- **Expected production** — fetches daily shortwave radiation for the site and derives
+  expected output from its capacity and performance ratio. The radiation figure, the
+  capacity and the ratio are all stored next to the result, so a row stays explicable
+  if the formula is ever retuned.
+- **Actual production** — imports an operator's CSV. Rows that fail validation go to a
+  quarantine table carrying a reason code and the line exactly as it was submitted.
+  Nothing is dropped silently, and a file with bad rows still imports its good ones.
+- **Run log** — every sync and every import writes a record, successes and failures
+  alike. The record is opened before the work starts, so a run that dies partway
+  through is still visible as a run that was attempted.
+- **Dashboard** — the outcome of the most recent sync and the most recent import, the
+  two series of daily figures, and the rows the last import rejected.
+
+## What it deliberately does not do
+
+- **The CSV parser does not handle quoted fields.** It splits on commas. The files it
+  reads are machine exports of daily totals — a date, a number and a site name — so a
+  value containing a comma is rejected as a malformed row rather than stored as a
+  guess. That limit is the reason the project does not pull in a CSV library.
+- **It does not compare the two series.** Expected and actual are shown as separate
+  tables; nothing yet puts them on one row or flags a divergence. That is the next
+  slice, not a missing piece of this one.
+- **One site.** The expected sync looks it up by name. Nothing about the schema is
+  single-site, but nothing iterates yet either.
+- **No tests.** `features/actual-import/parse-csv.ts` is pure and takes no database, so
+  it is the piece written to be tested first.
+- **No authentication, and no row level security policies.** Every database call is
+  made from server code holding the service role key. There is no browser-side key to
+  restrict, so there is no per-user rule to express. RLS is enabled on every table with
+  no policy, which denies everything that does not bypass it.
+- **Uploads are capped at 1 MB** by the server action default. Not raised, because the
+  files this reads are a few kilobytes.
 
 ## Stack
 
@@ -36,6 +62,9 @@ npm run dev
 
 The app runs at http://localhost:3000.
 
+A fresh database needs the migrations in `supabase/migrations` applied in filename
+order, then `supabase/seed.sql` to insert the site.
+
 ## Scripts
 
 | Script                 | Purpose                     |
@@ -51,8 +80,8 @@ The app runs at http://localhost:3000.
 
 ```
 app/         routes and pages
-components/  shared UI
 features/    one folder per slice, each owning its own fetch, logic, and persistence
 lib/         environment validation and the Supabase client
+samples/     a deliberately imperfect CSV, one bad row per rejection reason
 supabase/    schema migrations and seed data
 ```
